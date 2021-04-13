@@ -3,19 +3,21 @@
 ## Overview
 
 MessageStream, as the name suggests, is designed to send a series of messages.  It's intended as a binary alternative to
-[Json](https://www.json.org/json-en.html) which should be simpler to use for serializing application defined classes and
-other custom types [MessagePack](https://msgpack.org/index.html).
+[Json](https://www.json.org/json-en.html) but should be simpler to use for serializing application defined classes and
+other custom types than [MessagePack](https://msgpack.org/index.html).
 
-The basic premise is that applications provide their own callbacks to decompose custom types into MessageStream inbuilt
-types while encoding a message and likewise provide callbacks to reassemble the same types while decoding a message.
-Type names and object key names must be pre-agreed by the applications just as key names are pre-agreed in json.
+Usually this would be used with an agreed schema dictating how to serialize custom objects into MessageStream types
+and deserialize them back.  For common data types such as python `@dataclass` and `NamedTuple` this schema can be very 
+easily inferred by the library.
 
-If types have not been pre-agreed, the decoding application can still decode the message.  The application will just 
-receive the information in decomposed inbuilt types just as they would in Json.
+There so also a fallback way to read a message stream without first knowing the schema which will decompose the message 
+into structures such as lists, dictionaries and sets.  This is achieved by sending a rudimentary schema once for each 
+type just before it's used for the first time.  So unused types are never sent, and large arrays of the same type will 
+only send the schema once.  This gives MessageStream a significant size reduction over MessagePack.
 
 ## Streams, Messages and Objects
 
-A Stream is a sequence of messages in in a strict order.  If applications wish to send unordered (eg: over UDP) messages 
+A Stream is a sequence of messages in a strict order.  If applications wish to send unordered (eg: over UDP) messages 
 then this can be achieved by starting a new MessageStream for each message incurring a small overhead.
 See [Unordered Messages](#unordered-messages).
 
@@ -26,20 +28,17 @@ object's encoding follows as per the [control-code's definition](#control-code-d
 
 ## Out of Band Instructions
 
-FIX ME
-
-A necessary feature of this standard is to allow some additional meta-information to be conveyed.  This is primarily
-to avoid 
-throughout a message.  More precisely out of band control codes can be placed anywhere that another control code was 
-expected.  The expected control-code MUST follow the out of band control-code and any associated objects.
-
+A necessary feature of this standard is to allow some additional meta-information to be conveyed.  For example sending 
+the schema for a type just before sending an object of that type.  More precisely out of band control codes can be 
+placed almost anywhere that another control code was expected.  The planned list of these control codes is:
  - Defining a new custom type.
  - Flagging that the following object may be referred to later (anchor)
- - Enabling / disabling automatic anchors
+ - Enabling automatic anchors
+ - Disabling automatic anchors
  - Defining an object which has been mentioned in a forward reference
  
- Out of band control codes are effectively invisible to the flow rest of the flow.  The *do* something and may augment 
- the meaning, but they have no effect on the structure. 
+Out of band control codes are effectively invisible to the expected structure.  They *do* something and may require an 
+augment, but they have no effect on the structure. 
 
 ## Inbuilt types
 
@@ -47,7 +46,6 @@ MessageStream defines types separately from encodings for types.  Some types hav
 
 - Null (AKA python None)
 - Boolean (True / False)
-- Positive Integer
 - Integer (Positive and negative)
 - Decimal (Floating point number which behaves as if calculated in base 10)
 - Floating point
@@ -97,25 +95,36 @@ type and a decoder MUST accept any alternative for the same type.
 
 ## Control codes
 
-| Type    | Code   | Name                                      |
-|---------|--------|-------------------------------------------|
+| Type    | Code   | Name                                      | Description |
+|---------|--------|-------------------------------------------|-------------|
 |         | 0      | Stop Code
-|         | 1      | Strict Struct Type Definition             |
-|         | 2      | Flexible Struct Type Definition           | 
-|         | 3      | 
-|         | 1      | Reference Anchor |
+|         | 1      | Skip Code (Skips an element of a structure and uses the default |
+|         | 2      | Strict Struct Type Definition             |
+|         | 3      | Flexible Struct Type Definition           |
+|         | 1      | Reference Anchor | |
 |         | 2      | Enable Anchorless References |  After this point in the stream, every object is automatically assigned an anchor
 |         | 3      | Disable Anchorless references | Used after `2` to stop assigning anchors in the stream.
 |         | 4      | Back Reference   | Used in place of any other object to refer back to a *fully* described object.
 |         | 5      | Forward Reference | Used in place of any other object to refer to a *partially* described object.
 |         | 6      | Complete forward reference | Out of band op-code to write an arbitrary object.  This is useful if a forward reference has been used and there's no good palce to put the forward reference object. |
-| Null    | 10     | Null  | Null AKA None none python.
-| Bool    | 11     | False | Boolean false
-| Bool    | 12     | True  | Boolean true
-| Int     | 13     | Positive Variable byte Int | Define a positive integer by variable byte
-| Int     | 14     | Negative Variable bytee Int | Define a negative integer by variable byte
-| Int     | 15     | Signed multi byte integer | Control-code is followed by a variable byte integer stating how many bytes and the that number of bytes representing the integer as Bigendian
-| Str     | 16     | String | Unicode String encoded as UTF 8.  Control-code is immediately followed 
+|         | 9      | Skip code | Skip structure element and use the default | |
+| None    | 10     | Null  | Null AKA None none python. |
+| bool    | 11     | False | Boolean false |
+| bool    | 12     | True  | Boolean true |
+| int     | 13     | One byte Int |  Signed |
+| int     | 14     | Two byte Int | Signed Bigendian |
+| int     | 15     | Four byte Int | Signed Bigendian |
+| int     | 16     | Eight byte Int | Signed Bigendian |
+| int     | 17     | Multi byte integer | Control-code is followed by a variable byte integer stating how many bytes and the that number of bytes representing the integer as Signed Bigendian
+| bytes   | 18     | Raw Bytes | Variable byte in indicating how many bytes, followed by that number of bytes
+| str     | 19     | Single Character "String" | Non-python libraries should encode and may decode this as "char"
+| str     | 20     | Empty String | The empty string |
+| str     | 21     | Variable byte String | multi byte character followed by that number of **bytes** representing a UTF-8 string.  Invalid to include null char.
+| decimal | 22     | Positive Decimal | Complex encoding, records 1 byte per two significant figures |
+| decimal | 23     | Negative Decimal | Complex encoding, records 1 byte per two significant figures |
+| tuple   | 22     | Tuple | Variable byte integer stating how many elements follwed by that number of elements
+| list    | 23     | List  | Variable byte integer stating how many elements followed by that many elements
+| dict    | 24     | Dictionary | variable byte int stating how many (key, value) pairs followed by that many pairs of elements
 
 ## Anchors and References
 
