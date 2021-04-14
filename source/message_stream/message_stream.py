@@ -239,7 +239,7 @@ class EncoderContext:
     _target: BinaryIO
     _max_control_code: int
     _write_position: int
-    _back_references: Dict
+    _back_references: Dict[int, int]
 
     def __init__(self, encoders: Dict[Type, Tuple[EncoderDecoder, Dict[Any, int]]],
                  structures: Dict[Type, _StructDef], target: BinaryIO):
@@ -269,7 +269,8 @@ class EncoderContext:
             control_code = variant_map[variant]
             self.encode_variable_int(control_code)
             encode_method(value, self)
-            self._back_references[position] = value
+            if allow_backref:
+                self._back_references[id(value)] = position
 
     def encode_variable_int(self, val: int):
         if val < 0x80:

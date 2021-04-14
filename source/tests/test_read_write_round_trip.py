@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, NamedTuple
 from datetime import datetime, timezone
 import pytz
 import decimal
@@ -69,3 +69,18 @@ def test_complex_schema_dataclass(schema: message_stream.Schema):
     )
     schema.define_structure(Parent)
     test_basic_round_trip(schema, example_object)
+
+
+def test_back_references_are_used(schema: message_stream.Schema):
+    """
+    Certain conditions should cause the encoder to encode a backref.  This includes large strings.
+    """
+    value = "Lorem ipsum dolor sit amet, consectetur adipiscing elit."
+    result_1 = schema.dump_bytes((value,))
+    result_2 = schema.dump_bytes((value, value,))
+    assert len(result_2) == len(result_1) + 2
+
+    parsed_1, parsed_2 = schema.load_bytes(result_2)
+    assert parsed_1 is parsed_2
+    assert parsed_2 is not value
+    assert parsed_2 == value
