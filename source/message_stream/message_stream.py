@@ -1,10 +1,14 @@
-from typing import BinaryIO
-from typing import *
-from abc import abstractmethod, ABC
-import io
 import dataclasses
+import datetime
 import decimal
+import functools
+import io
+import struct
+from abc import abstractmethod, ABC
+from typing import *
+from typing import BinaryIO
 
+import pytz
 
 __all__ = ['Schema', 'ParseError', 'UnexpectedEof', 'UnknownControlCode', 'default_schema']
 
@@ -20,6 +24,12 @@ class UnexpectedEof(ParseError):
 class UnknownControlCode(ParseError):
     def __init__(self, control_code: int):
         super(f"Unknown control_code {control_code}")
+
+
+class VariantSpec(NamedTuple):
+    encode: Callable[[Any, "EncoderContext"], None]
+    variant_key: Any
+    allow_backref: bool
 
 
 class _SkipType:
@@ -130,9 +140,15 @@ class Schema:
             self._decoders[control_code] = encoder, variant
         self._encoders[object_type] = encoder, variant_map
 
-    def auto_struct(self, _type_def: Type = ..., name: Union[str, Callable[[Type], str]] = None):
+    def define_structure(self, _type_def: Type = ..., name: Union[str, Callable[[Type], str]] = None):
+        @functools.wraps(_type_def)
         def wrapper(type_def_2):
-            return self.auto_struct(type_def_2, name)
+            self.define_structure(type_def_2, name)
+            return type_def_2
+
+        if _type_def is ...:
+            # This function has been called to generate a decorator
+            return wrapper
 
         def eval_name(t):
             if hasattr(name, '__call__'):
@@ -150,10 +166,6 @@ class Schema:
                 # All other options have failed so auto-name the structure
                 return t.__name__
 
-        if _type_def is ...:
-            # This function has been called to generate a decorator
-            return wrapper
-
         new_structures_by_name = self._structures_by_name.copy()
         new_structures_by_type = self._structures_by_type.copy()
         for new_type, fields in self._evaluate_struct_schema(_type_def).items():
@@ -170,27 +182,55 @@ class Schema:
         self._structures_by_name = new_structures_by_name
 
     def _evaluate_struct_schema(self, structure: Type) -> Dict[Type, List[str]]:
-        structure_results: Dict[Type, List[str]] = {}
+        results: Dict[Type, List[str]] = {}
+        already_evaluated = set()
         to_evaluate = {structure}
         while to_evaluate:
-            current_struct = to_evaluate.pop()
-            field_names = []
-            structure_results[current_struct] = field_names
-            if dataclasses.is_dataclass(current_struct):
-                for field in dataclasses.fields(current_struct):
-                    field_names.append(field.name)
-                    if field.type not in self._encoders and field.type not in structure_results:
-                        to_evaluate.add(field.type)
-            elif issubclass(current_struct, tuple):
-                for field in current_struct._fields:
-                    field_names.append(field)
-                    if hasattr(current_struct, '_field_types'):
-                        field_type = current_struct._field_types.get(field)
-                        if field_type not in self._encoders and field_type not in structure_results:
-                            to_evaluate.add(field_type)
+            item = to_evaluate.pop()
+            already_evaluated.add(id(item))
+            if item in self._encoders:
+                pass
+            elif dataclasses.is_dataclass(item):
+                results[item] = self._evaluate_dataclass_struct(item, to_evaluate, already_evaluated)
+            elif isinstance(item, type) and issubclass(item, NamedTuple):
+                results[item] = self._evaluate_namedtuple_struct(item, to_evaluate, already_evaluated)
             else:
-                raise TypeError(f"Cannot evaluate structure for type {current_struct}, must be dataclass or namedtuple")
-        return structure_results
+                origin = get_origin(item)
+                if origin is not None and (origin is Union or origin in self._encoders):
+                    # This is things like typing.List, typing.Dict.
+                    # We accept any of those which are surrogates for things we have as encoders
+                    self._evaluate_typing_struct(item, to_evaluate, already_evaluated)
+                else:
+                    raise TypeError(f"Cannot evaluate structure for type {item}, must be dataclass or namedtuple")
+        return results
+
+    @classmethod
+    def _evaluate_dataclass_struct(cls, eval_struct, to_evaluate: Set[type], already_evaluated: Set[int]) -> List[str]:
+        field_names = []
+        for field in dataclasses.fields(eval_struct):
+            field_names.append(field.name)
+            cls._evaluate_child(field.type, to_evaluate, already_evaluated)
+        return field_names
+
+    @classmethod
+    def _evaluate_namedtuple_struct(cls, eval_struct, to_evaluate: Set[type], already_evaluated: Set[int]) -> List[str]:
+        field_names = []
+        for field in eval_struct._fields:
+            field_names.append(field)
+            if hasattr(eval_struct, '_field_types'):
+                field_type = eval_struct._field_types.get(field)
+                cls._evaluate_child(field_type, to_evaluate, already_evaluated)
+        return field_names
+
+    @classmethod
+    def _evaluate_typing_struct(cls, child: type, to_evaluate: Set[type], already_evaluated: Set[int]):
+        for field in get_args(child):
+            cls._evaluate_child(field, to_evaluate, already_evaluated)
+
+    @staticmethod
+    def _evaluate_child(child: type, to_evaluate: Set[type], already_evaluated: Set[int]):
+        if id(child) not in already_evaluated:
+            to_evaluate.add(child)
 
 
 class EncoderContext:
@@ -271,7 +311,7 @@ class EncoderContext:
         self.encode_variable_int(len(self._encoders[struct_type][1]))
         for variant, control_code in self._encoders[struct_type][1].items():
             self.encode_variable_int(control_code)
-            self.encode_object(variant, primitive_only=True)
+            self.encode_object(variant, simple_form=True)
         # Send the fields in the struct.  That way we never send the field names for every object.
         self.encode_variable_int(len(struct_def.fields))
         for field in struct_def.fields:
@@ -504,6 +544,17 @@ class StringEncoderDecoder(EncoderDecoder):
         return content.decode(self.ENCODING)
 
 
+class FloatEncoder(SingleVariantEncoder):
+    _STRUCT = struct.Struct('d')
+
+    def _encode(self, value, target: EncoderContext):
+        target.write(self._STRUCT.pack(value))
+
+    def decode(self, variant: Any, source: DecoderContext) -> Any:
+        result, = self._STRUCT.unpack(source.read(self._STRUCT.size))
+        return result
+
+
 class DecimalEncoder(EncoderDecoder):
     variants = [1, -1]
     _ENCODE_MAP = {key: value for value, key in enumerate("0123456789.", 1)}
@@ -533,7 +584,7 @@ class DecimalEncoder(EncoderDecoder):
         target.encode_variable_int(len(to_write))
         target.write(to_write)
 
-    def decode(self, variant: Any, source: "DecoderContext") -> Any:
+    def decode(self, variant: Any, source: DecoderContext) -> Any:
         def decode_iter():
             byte_val = 0
             try:
@@ -547,6 +598,34 @@ class DecimalEncoder(EncoderDecoder):
         bytes_read = source.read(length)
         result = decimal.Decimal(''.join(decode_iter()))
         return result * variant
+
+
+class DatetimeEncoder(EncoderDecoder):
+    variants = ['iso', 'iana']
+
+    def select_variant(self, value: datetime.datetime) -> Tuple[Callable[[Any, EncoderContext], None], Any, bool]:
+        if isinstance(value.tzinfo, pytz.tzinfo.BaseTzInfo) and str(value.tzinfo) in pytz.all_timezones_set:
+            return self._encode_iana, 'iana', True
+        return self._encode_iso, 'iso', True
+
+    def _encode_iso(self, value: datetime.datetime, encoder: EncoderContext):
+        encoder.encode_string(value.isoformat())
+
+    def _encode_iana(self, value: datetime.datetime, encoder: EncoderContext):
+        timezone = value.tzinfo
+        timezone_string = str(timezone)
+        timestamp_string = value.astimezone(datetime.timezone.utc).replace(tzinfo=None).isoformat()
+        encoder.encode_string(timestamp_string)
+        encoder.encode_string(timezone_string)
+
+    def decode(self, variant: Any, source: DecoderContext) -> Any:
+        timestamp_string = source.decode_string()
+        result = datetime.datetime.fromisoformat(timestamp_string)
+        if variant == 'iana':
+            timezone_string = source.decode_string()
+            timezone = pytz.timezone(timezone_string)
+            result = result.replace(tzinfo=datetime.timezone.utc).astimezone(timezone)
+        return result
 
 
 class SequenceElementEncoder(SingleVariantEncoder):
@@ -574,7 +653,7 @@ class DictEncoderDecoder(SingleVariantEncoder):
             target.encode_object(a)
             target.encode_object(b)
 
-    def decode(self, variant: Any, source: "DecoderContext") -> Any:
+    def decode(self, variant: Any, source: DecoderContext) -> Any:
         item_count = source.decode_variable_int()
         values = ((source.decode_object(), source.decode_object()) for _ in range(item_count))
         return self._dict_factory(values)
@@ -589,7 +668,7 @@ class StructEncoderDecoder(SingleVariantEncoder):
         for field in self._struct_def.fields:
             target.encode_object(getattr(value, field.encode_source, _SKIP))
 
-    def decode(self, variant: Any, source: "DecoderContext") -> Any:
+    def decode(self, variant: Any, source: DecoderContext) -> Any:
         values = {}
         for field in self._struct_def.fields:
             v = source.decode_object()
@@ -605,7 +684,9 @@ default_schema.add_type(bool, BoolEncoderDecoder())
 default_schema.add_type(int, IntEncoderDecoder())
 default_schema.add_type(bytes, BytesEncoderDecoder())
 default_schema.add_type(str, StringEncoderDecoder())
+default_schema.add_type(float, FloatEncoder())
 default_schema.add_type(decimal.Decimal, DecimalEncoder())
+default_schema.add_type(datetime.datetime, DatetimeEncoder())
 default_schema.add_type(tuple, SequenceElementEncoder(tuple))
 default_schema.add_type(list, SequenceElementEncoder(list))
 default_schema.add_type(set, SequenceElementEncoder(set))
