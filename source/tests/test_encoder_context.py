@@ -3,7 +3,8 @@ from io import BytesIO
 
 import pytest
 
-from message_stream.message_stream import EncoderContext, SentinelEncoder
+from message_stream.encoder_decoder import EncoderContext
+from message_stream.type_encoder_decoders import SentinelEncoder
 
 
 @pytest.fixture()

@@ -1,0 +1,6 @@
+ENDIAN = 'big'
+
+STRUCT_DEF_CONTROL_CODE = 0
+BACK_REF_CONTROL_CODE = 1
+
+SKIP = object()
