@@ -420,7 +420,7 @@ class DecoderContext:
         self._add_decoder(decoder, variants)
 
     def __next__(self):
-        return self.decode_object()
+        return self.decode_object(eof_okay=True)
 
     def __iter__(self):
         return self

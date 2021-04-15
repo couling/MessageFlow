@@ -1,5 +1,7 @@
 # pylint: disable=redefined-outer-name
 import decimal
+import io
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Dict, Tuple, Optional
@@ -112,3 +114,19 @@ def test_back_references_are_used(schema: message_stream.Schema):
     assert parsed_1 is parsed_2
     assert parsed_2 is not value
     assert parsed_2 == value
+
+
+def test_sequence_of_objects(schema: message_stream.Schema):
+    sequence = (1, 2, 2.0, 'hello', '👍', False, ...)
+    buffer = io.BytesIO()
+
+    encoder = schema.encoder(buffer)
+    for item in sequence:
+        encoder(item)
+
+    buffer.seek(0, os.SEEK_SET)
+
+    decoder = schema.decoder(buffer)
+    result = tuple(decoder)
+
+    assert result == sequence
