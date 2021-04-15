@@ -22,6 +22,6 @@ jobs:
         pip install pytest-timeout
     - name: Test
       run: |
-        python -m pytest -v --timeout=1 --durations=10 src/tests
+        python -m pytest -v --timeout=1 --durations=10 source/tests
       env:
         PYTHONPATH: src
