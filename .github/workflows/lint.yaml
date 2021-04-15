@@ -21,6 +21,6 @@ jobs:
         done
     - name: Lint
       run: |
-        pylint source
+        pylint source/*
       env:
           PYTHONPATH: source
