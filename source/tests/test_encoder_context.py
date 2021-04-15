@@ -1,5 +1,7 @@
-import pytest
+# pylint: disable=redefined-outer-name
 from io import BytesIO
+
+import pytest
 
 from message_stream.message_stream import EncoderContext, SentinelEncoder
 

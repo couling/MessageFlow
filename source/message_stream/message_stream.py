@@ -4,9 +4,8 @@ import decimal
 import functools
 import io
 import struct
+import typing as t
 from abc import abstractmethod, ABC
-from typing import *
-from typing import BinaryIO
 
 import pytz
 
@@ -23,20 +22,16 @@ class UnexpectedEof(ParseError):
 
 class UnknownControlCode(ParseError):
     def __init__(self, control_code: int):
-        super(f"Unknown control_code {control_code}")
+        super().__init__(f"Unknown control_code {control_code}")
 
 
-class VariantSpec(NamedTuple):
-    encode: Callable[[Any, "EncoderContext"], None]
-    variant_key: Any
+class VariantSpec(t.NamedTuple):
+    encode: t.Callable[[t.Any, "EncoderContext"], None]
+    variant_key: t.Any
     allow_backref: bool
 
 
-class _SkipType:
-    pass
-
-
-_SKIP = _SkipType()
+_SKIP = object()
 
 _STRUCT_DEF_CONTROL_CODE = 0
 _BACK_REF_CONTROL_CODE = 1
@@ -45,15 +40,15 @@ _BACK_REF_CONTROL_CODE = 1
 ENDIAN = 'big'
 
 
-class EncoderDecoder(Protocol):
-    variants: List[Any]
+class EncoderDecoder(t.Protocol):
+    variants: t.List[t.Any]
 
     @abstractmethod
-    def select_variant(self, value) -> Tuple[Callable[[Any, "EncoderContext"], None], Any, bool]:
+    def select_variant(self, value) -> t.Tuple[t.Callable[[t.Any, "EncoderContext"], None], t.Any, bool]:
         pass
 
     @abstractmethod
-    def decode(self, variant: Any, source: "DecoderContext") -> Any:
+    def decode(self, variant: t.Any, source: "DecoderContext") -> t.Any:
         pass
 
 
@@ -61,7 +56,7 @@ class SingleVariantEncoder(EncoderDecoder, ABC):
     variants = [None]
     _supports_back_ref = True
 
-    def select_variant(self, value) -> Tuple[Callable[[Any, "EncoderContext"], None], Any, bool]:
+    def select_variant(self, value) -> t.Tuple[t.Callable[[t.Any, "EncoderContext"], None], t.Any, bool]:
         return self._encode, None, self._supports_back_ref
 
     @abstractmethod
@@ -69,24 +64,24 @@ class SingleVariantEncoder(EncoderDecoder, ABC):
         pass
 
 
-class _StructFieldMap(NamedTuple):
+class _StructFieldMap(t.NamedTuple):
     encode_source: str
     decode_target: str
     name: str
 
 
-class _StructDef(NamedTuple):
-    encode_type: Type
-    decode_type: Type
+class _StructDef(t.NamedTuple):
+    encode_type: t.Type
+    decode_type: t.Type
     struct_name: str
-    fields: Collection[_StructFieldMap]
+    fields: t.Collection[_StructFieldMap]
 
 
 class Schema:
-    _encoders: Dict[Type, Tuple[EncoderDecoder, Dict[Any, int]]]
-    _decoders: Dict[int, Tuple[EncoderDecoder, Any]]
-    _structures_by_type: Dict[Type, _StructDef]
-    _structures_by_name: Dict[str, _StructDef]
+    _encoders: t.Dict[t.Type, t.Tuple[EncoderDecoder, t.Dict[t.Any, int]]]
+    _decoders: t.Dict[int, t.Tuple[EncoderDecoder, t.Any]]
+    _structures_by_type: t.Dict[t.Type, _StructDef]
+    _structures_by_name: t.Dict[str, _StructDef]
 
     def __init__(self):
         try:
@@ -100,13 +95,13 @@ class Schema:
             self._structures_by_name = {}
             self._structures_by_type = {}
 
-    def decoder(self, source: BinaryIO) -> Union[Iterable[Any], Iterator[Any]]:
+    def decoder(self, source: t.BinaryIO) -> t.Union[t.Iterable[t.Any], t.Iterator[t.Any]]:
         return DecoderContext(self._decoders.copy(), self._structures_by_name, source)
 
-    def encoder(self, target: BinaryIO) -> Callable[[Any], None]:
+    def encoder(self, target: t.BinaryIO) -> t.Callable[[t.Any], None]:
         return EncoderContext(self._encoders, self._structures_by_type, target)
 
-    def dump_bytes(self, value: Any) -> bytes:
+    def dump_bytes(self, value: t.Any) -> bytes:
         buffer = io.BytesIO()
         encode = self.encoder(buffer)
         encode(value)
@@ -117,8 +112,8 @@ class Schema:
         decoder = self.decoder(buffer)
         return next(decoder)
 
-    def add_type(self, object_type: Type, encoder: EncoderDecoder,
-                 control_codes: Union[int, Iterable[int], None] = None):
+    def add_type(self, object_type: t.Type, encoder: EncoderDecoder,
+                 control_codes: t.Union[int, t.Iterable[int], None] = None):
         if control_codes is None:
             try:
                 max_control_code = max(self._decoders) + 1
@@ -140,7 +135,7 @@ class Schema:
             self._decoders[control_code] = encoder, variant
         self._encoders[object_type] = encoder, variant_map
 
-    def define_structure(self, _type_def: Type = ..., name: Union[str, Callable[[Type], str]] = None):
+    def define_structure(self, _type_def: t.Type = ..., name: t.Union[str, t.Callable[[t.Type], str]] = None):
         @functools.wraps(_type_def)
         def wrapper(type_def_2):
             self.define_structure(type_def_2, name)
@@ -150,21 +145,20 @@ class Schema:
             # This function has been called to generate a decorator
             return wrapper
 
-        def eval_name(t):
+        def eval_name(type_class):
             if hasattr(name, '__call__'):
                 # A naming function has been provided.  It can decline to give a name returning None
-                result = name(t)
+                result = name(type_class)
                 if result is not None:
                     return result
-            if t is _type_def and isinstance(name, str):
+            if type_class is _type_def and isinstance(name, str):
                 # A single string name was provided for this structure (only this one, not it's children)
                 return name
-            elif t in new_structures_by_type:
+            if type_class in new_structures_by_type:
                 # Don't auto-name something we already have a name for
-                return new_structures_by_type[t][0]
-            else:
-                # All other options have failed so auto-name the structure
-                return t.__name__
+                return new_structures_by_type[type_class][0]
+            # All other options have failed so auto-name the structure
+            return type_class.__name__
 
         new_structures_by_name = self._structures_by_name.copy()
         new_structures_by_type = self._structures_by_type.copy()
@@ -181,8 +175,8 @@ class Schema:
         self._structures_by_type = new_structures_by_type
         self._structures_by_name = new_structures_by_name
 
-    def _evaluate_struct_schema(self, structure: Type) -> Dict[Type, List[str]]:
-        results: Dict[Type, List[str]] = {}
+    def _evaluate_struct_schema(self, structure: t.Type) -> t.Dict[t.Type, t.List[str]]:
+        results: t.Dict[t.Type, t.List[str]] = {}
         already_evaluated = set()
         to_evaluate = {structure}
         while to_evaluate:
@@ -192,11 +186,11 @@ class Schema:
                 pass
             elif dataclasses.is_dataclass(item):
                 results[item] = self._evaluate_dataclass_struct(item, to_evaluate, already_evaluated)
-            elif isinstance(item, type) and issubclass(item, NamedTuple):
+            elif isinstance(item, type) and issubclass(item, t.NamedTuple):
                 results[item] = self._evaluate_namedtuple_struct(item, to_evaluate, already_evaluated)
             else:
-                origin = get_origin(item)
-                if origin is not None and (origin is Union or origin in self._encoders):
+                origin = t.get_origin(item)
+                if origin is not None and (origin is t.Union or origin in self._encoders):
                     # This is things like typing.List, typing.Dict.
                     # We accept any of those which are surrogates for things we have as encoders
                     self._evaluate_typing_struct(item, to_evaluate, already_evaluated)
@@ -205,7 +199,8 @@ class Schema:
         return results
 
     @classmethod
-    def _evaluate_dataclass_struct(cls, eval_struct, to_evaluate: Set[type], already_evaluated: Set[int]) -> List[str]:
+    def _evaluate_dataclass_struct(cls, eval_struct, to_evaluate: t.Set[type],
+                                   already_evaluated: t.Set[int]) -> t.List[str]:
         field_names = []
         for field in dataclasses.fields(eval_struct):
             field_names.append(field.name)
@@ -213,8 +208,10 @@ class Schema:
         return field_names
 
     @classmethod
-    def _evaluate_namedtuple_struct(cls, eval_struct, to_evaluate: Set[type], already_evaluated: Set[int]) -> List[str]:
+    def _evaluate_namedtuple_struct(cls, eval_struct, to_evaluate: t.Set[type],
+                                    already_evaluated: t.Set[int]) -> t.List[str]:
         field_names = []
+        # pylint: disable=protected-access
         for field in eval_struct._fields:
             field_names.append(field)
             if hasattr(eval_struct, '_field_types'):
@@ -223,26 +220,26 @@ class Schema:
         return field_names
 
     @classmethod
-    def _evaluate_typing_struct(cls, child: type, to_evaluate: Set[type], already_evaluated: Set[int]):
-        for field in get_args(child):
+    def _evaluate_typing_struct(cls, child: type, to_evaluate: t.Set[type], already_evaluated: t.Set[int]):
+        for field in t.get_args(child):
             cls._evaluate_child(field, to_evaluate, already_evaluated)
 
     @staticmethod
-    def _evaluate_child(child: type, to_evaluate: Set[type], already_evaluated: Set[int]):
+    def _evaluate_child(child: type, to_evaluate: t.Set[type], already_evaluated: t.Set[int]):
         if id(child) not in already_evaluated:
             to_evaluate.add(child)
 
 
 class EncoderContext:
-    _encoders: Dict[Type, Tuple[EncoderDecoder, Dict[Any, int]]]
-    _structures_in_schema: Dict[Type, _StructDef]
-    _target: BinaryIO
+    _encoders: t.Dict[t.Type, t.Tuple[EncoderDecoder, t.Dict[t.Any, int]]]
+    _structures_in_schema: t.Dict[t.Type, _StructDef]
+    _target: t.BinaryIO
     _max_control_code: int
     _write_position: int
-    _back_references: Dict[int, int]
+    _back_references: t.Dict[int, int]
 
-    def __init__(self, encoders: Dict[Type, Tuple[EncoderDecoder, Dict[Any, int]]],
-                 structures: Dict[Type, _StructDef], target: BinaryIO):
+    def __init__(self, encoders: t.Dict[t.Type, t.Tuple[EncoderDecoder, t.Dict[t.Any, int]]],
+                 structures: t.Dict[t.Type, _StructDef], target: t.BinaryIO):
         self._encoders = encoders.copy()
         self._structures_in_schema = structures.copy()
         self._target = target
@@ -252,7 +249,7 @@ class EncoderContext:
     def write(self, value: bytes):
         self._target.write(value)
 
-    def encode_object(self, value: Any, simple_form: bool = False):
+    def encode_object(self, value: t.Any, simple_form: bool = False):
         try:
             encoder, variant_map = self._encoders[type(value)]
         except KeyError as ex:
@@ -294,14 +291,14 @@ class EncoderContext:
         self.encode_variable_int(_BACK_REF_CONTROL_CODE)
         self.encode_variable_int(offset)
 
-    def _add_encoder(self, obj_type: Type, encoder: EncoderDecoder):
+    def _add_encoder(self, obj_type: t.Type, encoder: EncoderDecoder):
         variant_map = {}
         for variant in encoder.variants:
             self._max_control_code += 1
             variant_map[variant] = self._max_control_code
         self._encoders[obj_type] = encoder, variant_map
 
-    def _declare_structure(self, struct_type: Type):
+    def _declare_structure(self, struct_type: t.Type):
         struct_def = self._structures_in_schema[struct_type]
         encoder = StructEncoderDecoder(struct_def)
         self._add_encoder(struct_type, encoder)
@@ -318,18 +315,18 @@ class EncoderContext:
         for field in struct_def.fields:
             self.encode_string(field.name)
 
-    def __call__(self, value: Any):
+    def __call__(self, value: t.Any):
         self.encode_object(value)
 
 
 class DecoderContext:
-    _decoders:  Dict[int, Tuple[EncoderDecoder, Any]]
-    _source: BinaryIO
-    _structures_in_schema: Dict[str, _StructDef]
-    _back_references = Dict[int, Any]
+    _decoders:  t.Dict[int, t.Tuple[EncoderDecoder, t.Any]]
+    _source: t.BinaryIO
+    _structures_in_schema: t.Dict[str, _StructDef]
+    _back_references = t.Dict[int, t.Any]
 
-    def __init__(self, decoders: Dict[int, Tuple[EncoderDecoder, Any]],
-                 structures: Dict[str, _StructDef], source: BinaryIO):
+    def __init__(self, decoders: t.Dict[int, t.Tuple[EncoderDecoder, t.Any]],
+                 structures: t.Dict[str, _StructDef], source: t.BinaryIO):
         self._decoders = decoders.copy()
         self._structures_in_schema = structures.copy()
         self._source = source
@@ -346,21 +343,21 @@ class DecoderContext:
             position = self._source.tell()
             try:
                 control_code = self.decode_variable_int()
-            except UnexpectedEof:
+            except UnexpectedEof as ex:
                 if eof_okay and self._source.tell() == position:
-                    raise StopIteration()
+                    raise StopIteration() from ex
                 raise
             if control_code == _STRUCT_DEF_CONTROL_CODE:
                 if not type_def_okay:
                     raise ParseError("Attempt to define a new type at invalid location")
                 self._declare_structure()
                 continue
-            elif control_code == _BACK_REF_CONTROL_CODE:
+            if control_code == _BACK_REF_CONTROL_CODE:
                 return self._decode_back_reference(position)
             try:
                 decoder, variant = self._decoders[control_code]
-            except KeyError:
-                raise UnknownControlCode(control_code)
+            except KeyError as ex:
+                raise UnknownControlCode(control_code) from ex
             result = decoder.decode(variant, self)
             self._back_references[position] = result
             return result
@@ -375,22 +372,21 @@ class DecoderContext:
             return int.from_bytes(first_byte + self.read(3), ENDIAN)
         if first_byte[0] & 0xF0 == 0xE0:
             return int.from_bytes(first_byte + self.read(7), ENDIAN)
-        else:
-            raise ParseError(f"Invalid first byt for variable int {first_byte.hex()}")
+        raise ParseError(f"Invalid first byt for variable int {first_byte.hex()}")
 
     def decode_string(self) -> str:
         length = self.decode_variable_int()
         value = self.read(length)
         return value.decode("utf-8")
 
-    def _decode_back_reference(self, current_position) -> Any:
+    def _decode_back_reference(self, current_position) -> t.Any:
         try:
             offset = self.decode_variable_int()
             return self._back_references[current_position - offset]
-        except KeyError:
-            raise ParseError("Invalid back reference")
+        except KeyError as ex:
+            raise ParseError("Invalid back reference") from ex
 
-    def _add_decoder(self, decoder: EncoderDecoder, variants: Collection[Tuple[int, Any]]):
+    def _add_decoder(self, decoder: EncoderDecoder, variants: t.Collection[t.Tuple[int, t.Any]]):
         for control_code, variant in variants:
             self._decoders[control_code] = decoder, variant
 
@@ -412,7 +408,7 @@ class DecoderContext:
             # We didn't know about this one, let's just decode it to a dict
             struct_def = _StructDef(type(None), dict, struct_name, tuple(_StructFieldMap(f, f, f) for f in fields))
         else:
-            expected_fields: Dict[str, _StructFieldMap] = {f.name: f for f in struct_def.fields}
+            expected_fields: t.Dict[str, _StructFieldMap] = {f.name: f for f in struct_def.fields}
             # Fields
             struct_def = _StructDef(struct_def.encode_type, struct_def.decode_type, struct_def.struct_name, tuple(
                 _StructFieldMap(expected_fields[f].encode_source, expected_fields[f].decode_target, f) for f in fields))
@@ -434,19 +430,20 @@ class SentinelEncoder(SingleVariantEncoder):
     _supports_back_ref = False
 
     def __init__(self, sentinel_value):
+        super().__init__()
         self._sentinel_value = sentinel_value
 
     def _encode(self, value, target: EncoderContext):
         pass
 
-    def decode(self, variant: Any, source: "DecoderContext") -> Any:
+    def decode(self, variant: t.Any, source: "DecoderContext") -> t.Any:
         return self._sentinel_value
 
 
 class BoolEncoderDecoder(EncoderDecoder):
     variants = [False, True]
 
-    def select_variant(self, value) -> Tuple[Callable[[Any, "EncoderContext"], None], Any, bool]:
+    def select_variant(self, value) -> t.Tuple[t.Callable[[t.Any, "EncoderContext"], None], t.Any, bool]:
         return self.encode, bool(value), False
 
     def encode(self, _, target: EncoderContext):
@@ -459,18 +456,17 @@ class BoolEncoderDecoder(EncoderDecoder):
 class IntEncoderDecoder(EncoderDecoder):
     variants = [1, 2, 4, 8, ...]
 
-    def select_variant(self, value: int) -> Tuple[Callable[[Any, EncoderContext], None], Any, bool]:
+    def select_variant(self, value: int) -> t.Tuple[t.Callable[[t.Any, EncoderContext], None], t.Any, bool]:
         length = int((7 + value.bit_length()) / 8)
         if length == 1:
             return self._encode_1_byte, 1, False
-        elif length == 2:
+        if length == 2:
             return self._encode_2_byte, 2, False
-        elif length <= 4:
+        if length <= 4:
             return self._encode_4_byte, 4, False
-        elif length <= 8:
+        if length <= 8:
             return self._encode_8_byte, 8, False
-        else:
-            return self._encode_big_byte, ..., True
+        return self._encode_big_byte, ..., True
 
     @staticmethod
     def _encode_1_byte(value: int, target: EncoderContext):
@@ -494,7 +490,7 @@ class IntEncoderDecoder(EncoderDecoder):
         target.encode_variable_int(byte_length)
         target.write(value.to_bytes(byte_length, ENDIAN))
 
-    def decode(self, variant: Any, source: DecoderContext) -> int:
+    def decode(self, variant: t.Any, source: DecoderContext) -> int:
         if variant is ...:
             variant = source.decode_variable_int()
         value = source.read(variant)
@@ -507,7 +503,7 @@ class BytesEncoderDecoder(SingleVariantEncoder):
         target.encode_variable_int(len(value))
         target.write(value)
 
-    def decode(self, variant: Any, source: DecoderContext) -> Any:
+    def decode(self, variant: t.Any, source: DecoderContext) -> t.Any:
         length = source.decode_variable_int()
         return source.read(length)
 
@@ -516,14 +512,15 @@ class StringEncoderDecoder(EncoderDecoder):
     variants = [1, 0, ...]
     ENCODING = "utf8"
 
-    def select_variant(self, value) -> Tuple[Callable[[Any, "EncoderContext"], None], Any, bool]:
+    def select_variant(self, value) -> t.Tuple[t.Callable[[t.Any, "EncoderContext"], None], t.Any, bool]:
         if len(value) == 0:
             return self._encode_fixed, 0, False
         if len(value) == 1:
             return self._encode_fixed, 1, False
         return self._encode, ..., True
 
-    def _encode_fixed(self, value, target: EncoderContext):
+    @staticmethod
+    def _encode_fixed(value, target: EncoderContext):
         content = value.encode("utf-8")
         target.write(content)
 
@@ -532,14 +529,21 @@ class StringEncoderDecoder(EncoderDecoder):
         target.encode_variable_int(len(content))
         target.write(content)
 
-    def decode(self, variant: Any, source: DecoderContext) -> Any:
+    def decode(self, variant: t.Any, source: DecoderContext) -> t.Any:
         if variant == 0:
             return ""
         if variant == 1:
-            b = source.read(1)
-            while b[-1] >= 128 and len(b) < 4:
-                b += source.read(1)
-            return b.decode(self.ENCODING)
+            bytes_read = source.read(1)
+            if bytes_read[0] & 0x80:
+                if bytes_read[0] & 0xE0 == 0xC0:
+                    bytes_read += source.read(1)
+                elif bytes_read[0] & 0xF0 == 0xE0:
+                    bytes_read += source.read(2)
+                elif bytes_read[0] & 0xF8 == 0xF0:
+                    bytes_read += source.read(3)
+                else:
+                    raise ParseError(f"Invalid UTF-8 first byte 0x{hex(bytes_read[0])}")
+            return bytes_read.decode(self.ENCODING)
         content_length = source.decode_variable_int()
         content = source.read(content_length)
         return content.decode(self.ENCODING)
@@ -551,52 +555,52 @@ class FloatEncoder(SingleVariantEncoder):
     def _encode(self, value, target: EncoderContext):
         target.write(self._STRUCT.pack(value))
 
-    def decode(self, variant: Any, source: DecoderContext) -> Any:
+    def decode(self, variant: t.Any, source: DecoderContext) -> t.Any:
         result, = self._STRUCT.unpack(source.read(self._STRUCT.size))
         return result
 
 
 class DecimalEncoder(EncoderDecoder):
     variants = [1, -1]
-    _ENCODE_MAP = {key: value for value, key in enumerate("0123456789.", 1)}
-    _DECODE_MAP = {key: value for key, value in enumerate("0123456789.", 1)}
+    _DECODE_MAP = "0123456789."
+    _ENCODE_MAP = {key: value for value, key in enumerate(_DECODE_MAP)}
 
-    def select_variant(self, value: decimal.Decimal) -> Tuple[Callable[[Any, "EncoderContext"], None], Any, bool]:
+    def select_variant(self, value: decimal.Decimal
+                       ) -> t.Tuple[t.Callable[[t.Any, "EncoderContext"], None], t.Any, bool]:
         if value < 0:
             return self._encode, -1, False
         return self._encode, 1, False
 
     def _encode(self, value: decimal.Decimal, target: EncoderContext):
         def _encode_iter():
-            encoded_value = str(value)
             try:
-                iterator = iter(encoded_value)
+                iterator = iter(string_value)
                 while True:
                     i = next(iterator)
                     j = next(iterator)
                     yield self._ENCODE_MAP[i] << 4 | self._ENCODE_MAP[j]
             except StopIteration:
-                if len(encoded_value) % 2:
-                    yield self._ENCODE_MAP[encoded_value[-1]] << 4
+                if len(string_value) % 2:
+                    yield self._ENCODE_MAP[string_value[-1]] << 4 | 0x0F
 
         if value < 0:
             value = 0 - value
-        to_write = bytes(_encode_iter())
-        target.encode_variable_int(len(to_write))
-        target.write(to_write)
+        string_value = str(value)
+        target.encode_variable_int(len(string_value))
+        target.write(bytes(_encode_iter()))
 
-    def decode(self, variant: Any, source: DecoderContext) -> Any:
+    def decode(self, variant: t.Any, source: DecoderContext) -> t.Any:
         def decode_iter():
             byte_val = 0
             try:
                 for byte_val in bytes_read:
                     yield self._DECODE_MAP[(byte_val & 0xF0) >> 4]
                     yield self._DECODE_MAP[byte_val & 0x0F]
-            except KeyError:
-                if byte_val & 0x0F:
-                    raise ParseError(f"Unexpected byte value in decimal {hex(byte_val)}")
+            except IndexError as ex:
+                if byte_val & 0x0F != 0x0F:
+                    raise ParseError(f"Unexpected byte value in decimal {hex(byte_val)}") from ex
         length = source.decode_variable_int()
-        bytes_read = source.read(length)
+        bytes_read = source.read(int(length / 2) + (length % 2))
         result = decimal.Decimal(''.join(decode_iter()))
         return result * variant
 
@@ -604,22 +608,25 @@ class DecimalEncoder(EncoderDecoder):
 class DatetimeEncoder(EncoderDecoder):
     variants = ['iso', 'iana']
 
-    def select_variant(self, value: datetime.datetime) -> Tuple[Callable[[Any, EncoderContext], None], Any, bool]:
+    def select_variant(self, value: datetime.datetime
+                       ) -> t.Tuple[t.Callable[[t.Any, EncoderContext], None], t.Any, bool]:
         if isinstance(value.tzinfo, pytz.tzinfo.BaseTzInfo) and str(value.tzinfo) in pytz.all_timezones_set:
             return self._encode_iana, 'iana', True
         return self._encode_iso, 'iso', True
 
-    def _encode_iso(self, value: datetime.datetime, encoder: EncoderContext):
+    @staticmethod
+    def _encode_iso(value: datetime.datetime, encoder: EncoderContext):
         encoder.encode_string(value.isoformat())
 
-    def _encode_iana(self, value: datetime.datetime, encoder: EncoderContext):
+    @staticmethod
+    def _encode_iana(value: datetime.datetime, encoder: EncoderContext):
         timezone = value.tzinfo
         timezone_string = str(timezone)
         timestamp_string = value.astimezone(datetime.timezone.utc).replace(tzinfo=None).isoformat()
         encoder.encode_string(timestamp_string)
         encoder.encode_string(timezone_string)
 
-    def decode(self, variant: Any, source: DecoderContext) -> Any:
+    def decode(self, variant: t.Any, source: DecoderContext) -> t.Any:
         timestamp_string = source.decode_string()
         result = datetime.datetime.fromisoformat(timestamp_string)
         if variant == 'iana':
@@ -631,6 +638,7 @@ class DatetimeEncoder(EncoderDecoder):
 
 class SequenceElementEncoder(SingleVariantEncoder):
     def __init__(self, sequence_factory):
+        super().__init__()
         self._sequence_factory = sequence_factory
 
     def _encode(self, value, target: EncoderContext):
@@ -638,23 +646,26 @@ class SequenceElementEncoder(SingleVariantEncoder):
         for item in value:
             target.encode_object(item)
 
-    def decode(self, variant: Any, source: DecoderContext) -> Any:
+    def decode(self, variant: t.Any, source: DecoderContext) -> t.Any:
         item_count = source.decode_variable_int()
         result = self._sequence_factory(source.decode_object() for _ in range(item_count))
         return result
 
 
 class DictEncoderDecoder(SingleVariantEncoder):
+    _dict_factory = t.Callable[[t.Iterable[t.Tuple[t.Any, t.Any]]], t.Any]
+
     def __init__(self, dict_factory=dict):
+        super().__init__()
         self._dict_factory = dict_factory
 
     def _encode(self, value, target: EncoderContext):
         target.encode_variable_int(len(value))
-        for a, b in value.items():
-            target.encode_object(a)
-            target.encode_object(b)
+        for k, v in value.items():
+            target.encode_object(k)
+            target.encode_object(v)
 
-    def decode(self, variant: Any, source: DecoderContext) -> Any:
+    def decode(self, variant: t.Any, source: DecoderContext) -> t.Any:
         item_count = source.decode_variable_int()
         values = ((source.decode_object(), source.decode_object()) for _ in range(item_count))
         return self._dict_factory(values)
@@ -663,13 +674,14 @@ class DictEncoderDecoder(SingleVariantEncoder):
 class StructEncoderDecoder(SingleVariantEncoder):
 
     def __init__(self, struct_def: _StructDef):
+        super().__init__()
         self._struct_def = struct_def
 
     def _encode(self, value, target: EncoderContext):
         for field in self._struct_def.fields:
             target.encode_object(getattr(value, field.encode_source, _SKIP))
 
-    def decode(self, variant: Any, source: DecoderContext) -> Any:
+    def decode(self, variant: t.Any, source: DecoderContext) -> t.Any:
         values = {}
         for field in self._struct_def.fields:
             v = source.decode_object()
@@ -681,6 +693,7 @@ class StructEncoderDecoder(SingleVariantEncoder):
 default_schema = Schema()
 default_schema.add_type(type(_SKIP), SentinelEncoder(_SKIP))
 default_schema.add_type(type(None), SentinelEncoder(None))
+default_schema.add_type(type(...), SentinelEncoder(...))
 default_schema.add_type(bool, BoolEncoderDecoder())
 default_schema.add_type(int, IntEncoderDecoder())
 default_schema.add_type(bytes, BytesEncoderDecoder())
@@ -694,7 +707,7 @@ default_schema.add_type(set, SequenceElementEncoder(set))
 default_schema.add_type(dict, DictEncoderDecoder())
 
 
-def dump_bytes(value: Any) -> bytes:
+def dump_bytes(value: t.Any) -> bytes:
     return default_schema.dump_bytes(value)
 
 
