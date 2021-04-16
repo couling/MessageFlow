@@ -95,7 +95,7 @@ type and a decoder MUST accept any alternative for the same type.
 
 ## Control codes
 
-**This has changed and has not been updated here** do not use this.
+**This has changed and has not been updated here** do not use this.  The correct list of control codes can be found in [base_schema](base_schema.md).
 
 | Type    | Code   | Name                                      | Description |
 |---------|--------|-------------------------------------------|-------------|

@@ -238,12 +238,12 @@ class DatetimeEncoder(EncoderDecoder):
     """
     Encodes a datetime in time
     """
-    variants = ['iso', 'iana']
+    variants = ['ISO', 'IANA']
 
     def select_variant(self, value: datetime.datetime) -> VariantSpec:
         if isinstance(value.tzinfo, pytz.tzinfo.BaseTzInfo) and str(value.tzinfo) in pytz.all_timezones_set:
-            return VariantSpec(self._encode_iana, 'iana', True)
-        return VariantSpec(self._encode_iso, 'iso', True)
+            return VariantSpec(self._encode_iana, 'IANA', True)
+        return VariantSpec(self._encode_iso, 'ISO', True)
 
     @staticmethod
     def _encode_iso(value: datetime.datetime, encoder: EncoderContext):
@@ -260,7 +260,7 @@ class DatetimeEncoder(EncoderDecoder):
     def decode(self, variant: t.Any, source: DecoderContext) -> t.Any:
         timestamp_string = source.decode_string()
         result = datetime.datetime.fromisoformat(timestamp_string)
-        if variant == 'iana':
+        if variant == 'IANA':
             if result.tzinfo is None:
                 raise ParseError("IANA datetime given without UTC offset")
             timezone_string = source.decode_string()

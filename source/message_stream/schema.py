@@ -73,7 +73,7 @@ class Schema:
         """
         buffer = io.BytesIO(byte_buffer)
         decoder = self.decoder(buffer)
-        result = next(decoder)
+        result = next(iter(decoder))
         if buffer.tell() != len(byte_buffer):
             raise ValueError("Bytes represents more than one buffer")
         return result
@@ -219,6 +219,34 @@ class Schema:
     def _evaluate_child(child: type, to_evaluate: t.Set[type], already_evaluated: t.Set[int]):
         if id(child) not in already_evaluated:
             to_evaluate.add(child)
+
+    def iter_type_variant_control_code(self) -> t.Iterable[t.Tuple[t.Any, t.Any, int]]:
+        """
+        Utility method iterates of the types variants and control codes, useful for documenting a schema.
+        Note that structures are not listed here as they do not gain control codes until encoded.
+        """
+        for encode_type, encode_spec in self._encoders.items():
+            _, variant_map = encode_spec
+            for variant, control_code in variant_map.items():
+                yield encode_type, variant, control_code
+
+    def document(self, target: t.TextIO):
+        """
+        Generates a table in text listing the hard control codes in this schema.  Compatible with github markdown.
+        :param target: A TextIO to write the document to.
+        """
+        def write_row(row):
+            target.write(f"|{row[0]:>{col_widths[0]}}|{row[1]:{col_widths[1]}}|{row[2]:{col_widths[2]}}|\r\n")
+
+        schema_spec = [(str(item[2]), item[0].__name__, str(item[1]))
+                       for item in self.iter_type_variant_control_code()]
+        schema_spec.sort(key=lambda x: int(x[0]))
+        headings = ['Code', 'Type', 'Variant']
+        col_widths = [max(max(len(str(record[i])) for record in schema_spec), len(headings[i])) for i in range(3)]
+        write_row(headings)
+        write_row(["-" * width for width in col_widths])
+        for record in schema_spec:
+            write_row(record)
 
 
 #: The default schema used by Schema if no parent has been specified.
