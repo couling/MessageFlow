@@ -95,6 +95,8 @@ type and a decoder MUST accept any alternative for the same type.
 
 ## Control codes
 
+**This has changed and has not been updated here** do not use this.
+
 | Type    | Code   | Name                                      | Description |
 |---------|--------|-------------------------------------------|-------------|
 |         | 0      | Stop Code
@@ -142,6 +144,25 @@ All anchors only survive for a message (other wise recipients would have to stor
 
 If the implementation maps a type to a mutable object then it MUST implement references to that type as a reference to 
 the same mutable object and not a carbon copy.
+
+## Datetimes
+
+MessageStream has in-built support for python `datetime`:
+
+ - datetime with no timezone (timezone unaware) will be serialized and de-serialzed with no timezone
+ - datetime with fixed timezone will be serialized and de-serialzed with the same fixed timezone
+ - datetime with a `pytz` (IANA) timezones will be serialized with both a fixed timezone and their IANA location name.
+
+### Warning: timezones are tricky  
+From time to time locations change their timezone, often for political reasons.  Software with an out of date IANA 
+database will encode in the wrong time fixed time-zone.  When they do, system's may not agree and the results are bad.
+
+MessageStream works on the assumption that, at worst, the encoder knows the correct time in UTC for the datetime it 
+encodes.  It encodes the timestamp, a fixed offset for the timestamp from UTC and the IANA location name for the 
+timestamp's origin.  Thus while encoding, both the timestamp in local time and timestamp in UTC are safely preserved.
+
+When decoding back, MessageStream will re-localize the timestamp.  So the local time that was sent may not match the 
+local time that was written if either encoder or decoder have an out of date timezone database.
 
 ## Protocol Error
 

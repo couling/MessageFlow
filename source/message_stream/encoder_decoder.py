@@ -1,3 +1,4 @@
+# pylint: disable=missing-function-docstring
 import datetime
 import decimal
 import struct
@@ -12,18 +13,33 @@ from .exceptions import ParseError
 
 
 class SingleVariantEncoder(EncoderDecoder, ABC):
+    """
+    Abstract class for any encoder / decoder with only a single variant.  Uses None as the variant key.
+    Implicitly supports backref.  Extensions can set _supports_back_ref = False to change this.
+    """
     variants = [None]
     _supports_back_ref = True
 
     def select_variant(self, value) -> VariantSpec:
+        """
+        There is only one variant so always returns self._encode, None (variant key), True (supports back-ref)
+        """
         return VariantSpec(self._encode, None, self._supports_back_ref)
 
     @abstractmethod
     def _encode(self, value, target: EncoderContext):
-        pass
+        """
+        Encodes the value
+        :param value: the value to encode
+        :param target: the EncoderContext to encode to.
+        """
 
 
 class SentinelEncoder(SingleVariantEncoder):
+    """
+    Encodes a type with only one value.  Eg None and ... (ellipses)
+    """
+
     _supports_back_ref = False
 
     def __init__(self, sentinel_value):
@@ -38,6 +54,9 @@ class SentinelEncoder(SingleVariantEncoder):
 
 
 class BoolEncoderDecoder(EncoderDecoder):
+    """
+    Encodes a bool
+    """
     variants = [False, True]
 
     def select_variant(self, value) -> VariantSpec:
@@ -51,6 +70,9 @@ class BoolEncoderDecoder(EncoderDecoder):
 
 
 class IntEncoderDecoder(EncoderDecoder):
+    """
+    Encodes an integer of any size
+    """
     variants = [1, 2, 4, 8, ...]
 
     def select_variant(self, value: int) -> VariantSpec:
@@ -95,7 +117,9 @@ class IntEncoderDecoder(EncoderDecoder):
 
 
 class BytesEncoderDecoder(SingleVariantEncoder):
-
+    """
+    Encodes raw bytes
+    """
     def _encode(self, value, target: EncoderContext):
         target.encode_variable_int(len(value))
         target.write(value)
@@ -106,6 +130,9 @@ class BytesEncoderDecoder(SingleVariantEncoder):
 
 
 class StringEncoderDecoder(EncoderDecoder):
+    """
+    Encodes a string in UTF-8.  As python has no char, this will encode a single character string as a char.
+    """
     variants = [1, 0, ...]
     ENCODING = "utf8"
 
@@ -147,6 +174,9 @@ class StringEncoderDecoder(EncoderDecoder):
 
 
 class FloatEncoder(SingleVariantEncoder):
+    """
+    Encodes a double (float)
+    """
     _STRUCT = struct.Struct('d')
 
     def _encode(self, value, target: EncoderContext):
@@ -158,6 +188,9 @@ class FloatEncoder(SingleVariantEncoder):
 
 
 class DecimalEncoder(EncoderDecoder):
+    """
+    Encodes a decimal.
+    """
     variants = [1, -1]
     _DECODE_MAP = "0123456789."
     _ENCODE_MAP = {key: value for value, key in enumerate(_DECODE_MAP)}
@@ -202,6 +235,9 @@ class DecimalEncoder(EncoderDecoder):
 
 
 class DatetimeEncoder(EncoderDecoder):
+    """
+    Encodes a datetime in time
+    """
     variants = ['iso', 'iana']
 
     def select_variant(self, value: datetime.datetime) -> VariantSpec:
@@ -217,7 +253,7 @@ class DatetimeEncoder(EncoderDecoder):
     def _encode_iana(value: datetime.datetime, encoder: EncoderContext):
         timezone = value.tzinfo
         timezone_string = str(timezone)
-        timestamp_string = value.astimezone(datetime.timezone.utc).replace(tzinfo=None).isoformat()
+        timestamp_string = value.tzinfo.normalize(value).isoformat()
         encoder.encode_string(timestamp_string)
         encoder.encode_string(timezone_string)
 
@@ -225,13 +261,18 @@ class DatetimeEncoder(EncoderDecoder):
         timestamp_string = source.decode_string()
         result = datetime.datetime.fromisoformat(timestamp_string)
         if variant == 'iana':
+            if result.tzinfo is None:
+                raise ParseError("IANA datetime given without UTC offset")
             timezone_string = source.decode_string()
             timezone = pytz.timezone(timezone_string)
-            result = result.replace(tzinfo=datetime.timezone.utc).astimezone(timezone)
+            result = result.astimezone(timezone)
         return result
 
 
 class SequenceElementEncoder(SingleVariantEncoder):
+    """
+    Encodes any generic sequence such as a list, tuple etc.
+    """
     def __init__(self, sequence_factory):
         super().__init__()
         self._sequence_factory = sequence_factory
@@ -248,6 +289,9 @@ class SequenceElementEncoder(SingleVariantEncoder):
 
 
 class DictEncoderDecoder(SingleVariantEncoder):
+    """
+    Encodes a key-value dictionary or ordered dictionary.
+    """
     _dict_factory = t.Callable[[t.Iterable[t.Tuple[t.Any, t.Any]]], t.Any]
 
     def __init__(self, dict_factory=dict):
@@ -267,7 +311,9 @@ class DictEncoderDecoder(SingleVariantEncoder):
 
 
 class StructEncoderDecoder(SingleVariantEncoder):
-
+    """
+    Encodes a custom structure such as NamedTuple or @dataclass
+    """
     def __init__(self, struct_def: StructDefinition):
         super().__init__()
         self._struct_def = struct_def

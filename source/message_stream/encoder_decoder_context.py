@@ -9,6 +9,9 @@ __all__ = ['EncoderContext', 'DecoderContext']
 
 
 class EncoderContext(abstract.EncoderContext):
+    """
+    Encodes objects
+    """
     _encoders: t.Dict[t.Type, t.Tuple[abstract.EncoderDecoder, t.Dict[t.Any, int]]]
     _structures_in_schema: t.Dict[t.Type, StructDefinition]
     _target: t.BinaryIO
@@ -96,6 +99,9 @@ class EncoderContext(abstract.EncoderContext):
 
 
 class DecoderContext(abstract.DecoderContext):
+    """
+    Decodes objects
+    """
     _decoders:  t.Dict[int, t.Tuple[abstract.EncoderDecoder, t.Any]]
     _source: t.BinaryIO
     _structures_in_schema: t.Dict[str, StructDefinition]

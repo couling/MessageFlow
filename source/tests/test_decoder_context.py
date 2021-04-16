@@ -10,15 +10,25 @@ from message_stream.encoder_decoder_context import DecoderContext
 
 @pytest.fixture()
 def encoded_data() -> BytesIO:
+    """
+    Encoded data
+    """
     return BytesIO()
 
 
 @pytest.fixture()
 def decoder_context(encoded_data) -> DecoderContext:
+    """
+    A raw decoder context without EncoderDecoders.
+    :param encoded_data: somewhere to write to
+    """
     return DecoderContext({}, {}, encoded_data)
 
 
 def test_invalid_control_code_raises_parse_error(decoder_context: DecoderContext, encoded_data: BytesIO):
+    """
+    Check an invalid control code will raise an error.
+    """
     encoded_data.write(bytes([99]))
     encoded_data.seek(0, os.SEEK_SET)
     with pytest.raises(exceptions.UnknownControlCode):
@@ -26,6 +36,9 @@ def test_invalid_control_code_raises_parse_error(decoder_context: DecoderContext
 
 
 def test_invalid_variable_int_raises_error(decoder_context: DecoderContext, encoded_data: BytesIO):
+    """
+    Variable int has a maximum of 2**60-1.  So try to encode 2**60 and see if this raises an error.
+    """
     encoded_data.write(bytes([0xF8, 0x00, 0x00]))
     encoded_data.seek(0, os.SEEK_SET)
     with pytest.raises(exceptions.ParseError):
@@ -44,6 +57,9 @@ def test_invalid_variable_int_raises_error(decoder_context: DecoderContext, enco
 ], ids=lambda x: f"0x{x.hex()}" if isinstance(x, bytes) else str(x))
 def test_read_variable_int_correct_value(byte_value: bytes, expected_value: int, decoder_context: DecoderContext,
                                          encoded_data: BytesIO):
+    """
+    Check that variable int reads the correct value
+    """
     encoded_data.write(byte_value)
     encoded_data.seek(0, os.SEEK_SET)
     result = decoder_context.decode_variable_int()
@@ -62,6 +78,9 @@ def test_read_variable_int_correct_value(byte_value: bytes, expected_value: int,
 ], ids=lambda x: f"0x{x.hex()}")
 def test_read_variable_int_does_not_over_read(byte_value: bytes, decoder_context: DecoderContext,
                                               encoded_data: BytesIO):
+    """
+    Check that variable int does not over-read.
+    """
     encoded_data.write(byte_value)
     encoded_data.write(bytes(10))
     encoded_data.seek(0, os.SEEK_SET)

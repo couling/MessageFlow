@@ -1,4 +1,4 @@
-# pylint: disable=redefined-outer-name
+# pylint: disable=redefined-outer-name,missing-class-docstring
 import decimal
 import io
 import os
@@ -14,6 +14,9 @@ import message_stream
 
 @pytest.fixture()
 def schema() -> message_stream.Schema:
+    """
+    A simple schema
+    """
     return message_stream.Schema()
 
 
@@ -46,13 +49,16 @@ BASE_TYPE_EXAMPLES = [
      datetime(2021, 1, 30, 10, 21, 1, 123, timezone.utc).astimezone(pytz.timezone('America/New_York')),
      datetime(2021, 6, 30, 10, 21, 1, 0, timezone.utc).astimezone(pytz.timezone('America/New_York')),
      [1, 2, 3],
-    ('x', 'y', 'zee'),
-    {'x': 1, 1: 'y'},
-    {'', 'b', 'bee'},
+     ('x', 'y', 'zee'),
+     {'x': 1, 1: 'y'},
+     {'', 'b', 'bee'},
 ]
 
 
 def raw_example_ids(example):
+    """
+    Returns friendly names for all RAW_EXAMPLES
+    """
     if isinstance(example, bytes):
         return str([f"0x{hex(i)}" for i in example])
     if example == '':
@@ -62,6 +68,9 @@ def raw_example_ids(example):
 
 @pytest.mark.parametrize('to_encode', BASE_TYPE_EXAMPLES, ids=raw_example_ids)
 def test_raw_round_trip(to_encode):
+    """
+    Test encoding an basic objects through the default schema and decoding them back results in identical objects
+    """
     encoded_value = message_stream.dump_bytes(to_encode)
     decoded_value = message_stream.load_bytes(encoded_value)
     assert to_encode == decoded_value
@@ -71,6 +80,9 @@ def test_raw_round_trip(to_encode):
 
 @pytest.mark.parametrize('to_encode', BASE_TYPE_EXAMPLES, ids=raw_example_ids)
 def test_basic_round_trip(schema: message_stream.Schema, to_encode):
+    """
+    Test that encoding basic object through a fresh schema then decoding them back results in identical objects
+    """
     encoded_value = schema.dump_bytes(to_encode)
     decoded_value = schema.load_bytes(encoded_value)
     assert to_encode == decoded_value
@@ -79,6 +91,10 @@ def test_basic_round_trip(schema: message_stream.Schema, to_encode):
 
 
 def test_simple_schema_dataclass(schema):
+    """
+    Test a simple schema can be encoded and decoded
+    """
+
     @schema.define_structure()
     @dataclass()
     class Simple:
@@ -89,6 +105,9 @@ def test_simple_schema_dataclass(schema):
 
 
 def test_complex_schema_dataclass(schema: message_stream.Schema):
+    """
+    Test a complex schema (with children) can be encoded and decoded.
+    """
     @dataclass()
     class Child1:
         name: str
@@ -121,6 +140,9 @@ def test_complex_schema_dataclass(schema: message_stream.Schema):
 
 
 def test_complex_schema_named_tuple(schema: message_stream.Schema):
+    """
+    Test complex schema of named tuples can be encoded and decoded.
+    """
     class Child1(NamedTuple):
         name: str
         value: int
@@ -165,6 +187,9 @@ def test_back_references_are_used(schema: message_stream.Schema):
 
 
 def test_sequence_of_objects(schema: message_stream.Schema):
+    """
+    Test that encoding a sequence of top level objects can be read back.
+    """
     sequence = (1, 2, 2.0, 'hello', '👍', False, ...)
     buffer = io.BytesIO()
 

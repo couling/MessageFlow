@@ -13,6 +13,10 @@ __all__ = ['Schema', 'default_schema', 'dump_bytes', 'load_bytes']
 
 
 class Schema:
+    """
+    An agreed schema between clients.  Schemas can be created as a copy of a "parent" or will otherwise start as a copy
+    of the "default_schema".
+    """
     _encoders: t.Dict[t.Type, t.Tuple[EncoderDecoder, t.Dict[t.Any, int]]]
     _decoders: t.Dict[int, t.Tuple[EncoderDecoder, t.Any]]
     _structures_by_type: t.Dict[t.Type, StructDefinition]
@@ -34,25 +38,56 @@ class Schema:
         self._structures_by_name = parent._structures_by_name.copy()
         self._structures_by_type = parent._structures_by_type.copy()
 
-    def decoder(self, source: t.BinaryIO) -> t.Union[t.Iterable[t.Any], t.Iterator[t.Any]]:
+    def decoder(self, source: t.BinaryIO) -> t.Union[t.Iterable[t.Any]]:
+        """
+        Get decoder for this schema which will read from the given source
+        :param source: the BinaryIO input stream to read from.
+        :return: An iterable object which will iterate through the objects on the stream.
+        """
         return DecoderContext(self._decoders.copy(), self._structures_by_name, source)
 
     def encoder(self, target: t.BinaryIO) -> t.Callable[[t.Any], None]:
+        """
+        Get an encoder for this schema which will write to the given BinaryIO target.
+        :param target: The output stream to write to.
+        :return: a callable object which takes one argument (the object to encode).
+        """
         return EncoderContext(self._encoders, self._structures_by_type, target)
 
     def dump_bytes(self, value: t.Any) -> bytes:
+        """
+        Shorthand method for encoding a single object to bytes
+        :param value: A single object to encode
+        :return:
+        """
         buffer = io.BytesIO()
         encode = self.encoder(buffer)
         encode(value)
         return buffer.getvalue()
 
-    def load_bytes(self, buffer: bytes):
-        buffer = io.BytesIO(buffer)
+    def load_bytes(self, byte_buffer: bytes):
+        """
+        A shorthand method for decoding bytes into a single object.
+        :param byte_buffer:
+        :return: the decoded object
+        """
+        buffer = io.BytesIO(byte_buffer)
         decoder = self.decoder(buffer)
-        return next(decoder)
+        result = next(decoder)
+        if buffer.tell() != len(byte_buffer):
+            raise ValueError("Bytes represents more than one buffer")
+        return result
 
     def add_type(self, object_type: t.Type, encoder: EncoderDecoder,
                  control_codes: t.Union[int, t.Iterable[int], None] = None):
+        """
+        Add a new fixed type to the schema.  Types added this way will not be declared in the stream and simply used
+        on the assumption the same type has been added by the calling client.
+        :param object_type: The object type to encode
+        :param encoder: The EncoderDecoder to handle this type
+        :param control_codes: An optional list of control codes for this type, one for each variant.  By default they
+        will simply be assigned.
+        """
         if control_codes is None:
             try:
                 max_control_code = max(self._decoders) + 1
@@ -74,7 +109,24 @@ class Schema:
             self._decoders[control_code] = encoder, variant
         self._encoders[object_type] = encoder, variant_map
 
-    def define_structure(self, _type_def: t.Type = ..., name: t.Union[str, t.Callable[[t.Type], str]] = None):
+    def define_structure(self, _type_def: t.Type = ...,
+                         name: t.Union[str, t.Callable[[t.Type], t.Optional[str]]] = None):
+        """
+        Adds a new structure to the schema.  Any type added this way will be "declared" before use.  A name may be given
+        in the schema for this type or the types own python name will be used.  The metho may be called multiple times
+        for the same type to re-name the type.
+
+        This gives some fault tolerance where different apps have mismatched schemas.
+
+        This may be used both as a callable method and an annotation.
+        :param _type_def: The structure to add.  This must be a NamedTuple of @dataclass.
+        :param name:  The name to give this structure in schema.  This must be unique within the schema.
+                        - The default name is _type_def.__name__ will be used if none has already been set for this type
+                        - If a string, the type name will be set to the given string, any child classes will be auto
+                          assigned a default name
+                        - If a callable, it will be called for this type and all it's children.  If a string is returned
+                          this name will be used.  If None, the default will be used.
+        """
         @functools.wraps(_type_def)
         def wrapper(type_def_2):
             self.define_structure(type_def_2, name)
@@ -169,6 +221,7 @@ class Schema:
             to_evaluate.add(child)
 
 
+#: The default schema used by Schema if no parent has been specified.
 default_schema = Schema()
 
 default_schema.add_type(type(constants.SKIP), encoder_decoder.SentinelEncoder(constants.SKIP))
@@ -188,8 +241,18 @@ default_schema.add_type(dict, encoder_decoder.DictEncoderDecoder())
 
 
 def dump_bytes(value: t.Any) -> bytes:
+    """
+    Shorthand to dump a single object to bytes using the default schema.
+    :param value: The object to dump
+    :return: The bytes representation of that object
+    """
     return default_schema.dump_bytes(value)
 
 
 def load_bytes(buffer: bytes):
+    """
+    Shorthand to load an object from bytes using the default schema
+    :param buffer: The bytes representation of an object
+    :return: the object
+    """
     return default_schema.load_bytes(buffer)
