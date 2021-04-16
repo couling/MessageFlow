@@ -5,9 +5,9 @@ import functools
 import io
 import typing as t
 
-from . import type_encoder_decoders, constants
+from . import encoder_decoder, constants
 from .abstract import StructDefinition, StructFieldMap, EncoderDecoder
-from .encoder_decoder import EncoderContext, DecoderContext
+from .encoder_decoder_context import EncoderContext, DecoderContext
 
 __all__ = ['Schema', 'default_schema', 'dump_bytes', 'load_bytes']
 
@@ -125,7 +125,7 @@ class Schema:
                 pass
             elif dataclasses.is_dataclass(item):
                 results[item] = self._evaluate_dataclass_struct(item, to_evaluate, already_evaluated)
-            elif isinstance(item, type) and issubclass(item, t.NamedTuple):
+            elif isinstance(item, type) and issubclass(item, tuple) and hasattr(item, '_fields'):
                 results[item] = self._evaluate_namedtuple_struct(item, to_evaluate, already_evaluated)
             else:
                 origin = t.get_origin(item)
@@ -134,7 +134,7 @@ class Schema:
                     # We accept any of those which are surrogates for things we have as encoders
                     self._evaluate_typing_struct(item, to_evaluate, already_evaluated)
                 else:
-                    raise TypeError(f"Cannot evaluate structure for type {item}, must be dataclass or namedtuple")
+                    raise TypeError(f"Cannot evaluate structure for type {item}, must be @dataclass or NamedTuple")
         return results
 
     @classmethod
@@ -171,20 +171,20 @@ class Schema:
 
 default_schema = Schema()
 
-default_schema.add_type(type(constants.SKIP), type_encoder_decoders.SentinelEncoder(constants.SKIP))
-default_schema.add_type(type(None), type_encoder_decoders.SentinelEncoder(None))
-default_schema.add_type(type(...), type_encoder_decoders.SentinelEncoder(...))
-default_schema.add_type(bool, type_encoder_decoders.BoolEncoderDecoder())
-default_schema.add_type(int, type_encoder_decoders.IntEncoderDecoder())
-default_schema.add_type(bytes, type_encoder_decoders.BytesEncoderDecoder())
-default_schema.add_type(str, type_encoder_decoders.StringEncoderDecoder())
-default_schema.add_type(float, type_encoder_decoders.FloatEncoder())
-default_schema.add_type(decimal.Decimal, type_encoder_decoders.DecimalEncoder())
-default_schema.add_type(datetime.datetime, type_encoder_decoders.DatetimeEncoder())
-default_schema.add_type(tuple, type_encoder_decoders.SequenceElementEncoder(tuple))
-default_schema.add_type(list, type_encoder_decoders.SequenceElementEncoder(list))
-default_schema.add_type(set, type_encoder_decoders.SequenceElementEncoder(set))
-default_schema.add_type(dict, type_encoder_decoders.DictEncoderDecoder())
+default_schema.add_type(type(constants.SKIP), encoder_decoder.SentinelEncoder(constants.SKIP))
+default_schema.add_type(type(None), encoder_decoder.SentinelEncoder(None))
+default_schema.add_type(type(...), encoder_decoder.SentinelEncoder(...))
+default_schema.add_type(bool, encoder_decoder.BoolEncoderDecoder())
+default_schema.add_type(int, encoder_decoder.IntEncoderDecoder())
+default_schema.add_type(bytes, encoder_decoder.BytesEncoderDecoder())
+default_schema.add_type(str, encoder_decoder.StringEncoderDecoder())
+default_schema.add_type(float, encoder_decoder.FloatEncoder())
+default_schema.add_type(decimal.Decimal, encoder_decoder.DecimalEncoder())
+default_schema.add_type(datetime.datetime, encoder_decoder.DatetimeEncoder())
+default_schema.add_type(tuple, encoder_decoder.SequenceElementEncoder(tuple))
+default_schema.add_type(list, encoder_decoder.SequenceElementEncoder(list))
+default_schema.add_type(set, encoder_decoder.SequenceElementEncoder(set))
+default_schema.add_type(dict, encoder_decoder.DictEncoderDecoder())
 
 
 def dump_bytes(value: t.Any) -> bytes:

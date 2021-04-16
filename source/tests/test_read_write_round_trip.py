@@ -4,7 +4,7 @@ import io
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, NamedTuple
 
 import pytest
 import pytz
@@ -17,40 +17,59 @@ def schema() -> message_stream.Schema:
     return message_stream.Schema()
 
 
-@pytest.mark.parametrize(
-    'to_encode',
-    [
-         None,
-         ...,
-         True,
-         False,
-         0,
-         1,
-         10,
-         100,
-         10000,
-         1000000000000000000000,
-         0.0,
-         0.9,
-         '',  # zero chars
-         'y',  # one byte one char
-         '£',  # two bytes one char
-         '✓',  # three bytes one char
-         '👍',  # four bytes one char
-         'hello',  # bytes == chars
-         'Hey 👍',  # bytes > chars
-         b'some bytes',
-         decimal.Decimal("1.2345"),
-         decimal.Decimal("-600.54321"),
-         datetime.now(),
-         datetime.now(timezone.utc), datetime.now().replace(microsecond=0),
-         datetime(2021, 1, 30, 10, 21, 1, 123, timezone.utc).astimezone(pytz.timezone('America/New_York')),
-         datetime(2021, 6, 30, 10, 21, 1, 0, timezone.utc).astimezone(pytz.timezone('America/New_York')),
-         [1, 2, 3],
-        ('x', 'y', 'zee'),
-        {'x': 1, 1: 'y'},
-        {'', 'b', 'bee'},
-    ], ids=lambda x: f"'{x}'")
+BASE_TYPE_EXAMPLES = [
+     None,
+     ...,
+     True,
+     False,
+     0,
+     1,
+     10,
+     100,
+     10000,
+     1000000000000000000000,
+     2 ** 33,
+     0.0,
+     0.9,
+     '',  # zero chars
+     'y',  # one byte one char
+     '£',  # two bytes one char
+     '✓',  # three bytes one char
+     '👍',  # four bytes one char
+     'hello',  # bytes == chars
+     'Hey 👍',  # bytes > chars
+     b'some bytes',
+     decimal.Decimal("1.2345"),
+     decimal.Decimal("-600.54321"),
+     datetime.now(),
+     datetime.now(timezone.utc), datetime.now().replace(microsecond=0),
+     datetime(2021, 1, 30, 10, 21, 1, 123, timezone.utc).astimezone(pytz.timezone('America/New_York')),
+     datetime(2021, 6, 30, 10, 21, 1, 0, timezone.utc).astimezone(pytz.timezone('America/New_York')),
+     [1, 2, 3],
+    ('x', 'y', 'zee'),
+    {'x': 1, 1: 'y'},
+    {'', 'b', 'bee'},
+]
+
+
+def raw_example_ids(example):
+    if isinstance(example, bytes):
+        return str([f"0x{hex(i)}" for i in example])
+    if example == '':
+        return "<empty string>"
+    return str(example)
+
+
+@pytest.mark.parametrize('to_encode', BASE_TYPE_EXAMPLES, ids=raw_example_ids)
+def test_raw_round_trip(to_encode):
+    encoded_value = message_stream.dump_bytes(to_encode)
+    decoded_value = message_stream.load_bytes(encoded_value)
+    assert to_encode == decoded_value
+    # pylint: disable=unidiomatic-typecheck
+    assert type(to_encode) == type(decoded_value)
+
+
+@pytest.mark.parametrize('to_encode', BASE_TYPE_EXAMPLES, ids=raw_example_ids)
 def test_basic_round_trip(schema: message_stream.Schema, to_encode):
     encoded_value = schema.dump_bytes(to_encode)
     decoded_value = schema.load_bytes(encoded_value)
@@ -82,6 +101,35 @@ def test_complex_schema_dataclass(schema: message_stream.Schema):
 
     @dataclass()
     class Parent:
+        some_list: List[int]
+        some_tuple: Tuple[str, str]
+        some_dict: Dict[int, str]
+        some_child: Child1
+        some_optional_set: Optional[Child2]
+        some_optional_not_set: Optional[Child2]
+
+    example_object = Parent(
+        some_list=[9, 8, 7],
+        some_tuple=('foo', 'bar'),
+        some_dict={1: 'true'},
+        some_child=Child1(name='bob', value=10),
+        some_optional_set=Child2(first='foo', second='bar'),
+        some_optional_not_set=None,
+    )
+    schema.define_structure(Parent)
+    test_basic_round_trip(schema, example_object)
+
+
+def test_complex_schema_named_tuple(schema: message_stream.Schema):
+    class Child1(NamedTuple):
+        name: str
+        value: int
+
+    class Child2(NamedTuple):
+        first: str
+        second: str
+
+    class Parent(NamedTuple):
         some_list: List[int]
         some_tuple: Tuple[str, str]
         some_dict: Dict[int, str]
